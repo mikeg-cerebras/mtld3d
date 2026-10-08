@@ -18,9 +18,17 @@ use objc2_metal::{
 use super::{
     BlitSite, DepthTransfer, DepthTransferResample, append_signposts, buffer_role,
     copy_buffer_details, depth_transfer, depth_transfer_resample, diagnostic_descriptor,
-    dispatch_region, encoder_state_name, error_details, gpu_duration_ms, metadata_string,
-    optional_string, resample_details, sequence, status_name, texture_details,
+    dispatch_region, encoder_state_name, error_details, gpu_duration_ms, host_uptime_ns,
+    metadata_string, optional_string, resample_details, sequence, status_name, texture_details,
 };
+
+#[test]
+fn cpu_timing_clock_is_nonzero_and_monotonic() {
+    let before = host_uptime_ns().expect("the macOS host-uptime clock is available");
+    let after = host_uptime_ns().expect("the macOS host-uptime clock is available");
+    assert!(before > 0);
+    assert!(after >= before);
+}
 
 define_class!(
     // SAFETY: NSObject has no subclassing requirements. This fixture has no ivars or Drop.

@@ -37,7 +37,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use block2::RcBlock;
@@ -753,6 +753,10 @@ fn present_frame(record: &Arc<DeviceRecord>, queue: &ProtocolObject<dyn MTLComma
         // reaches the screen. The render work committed already; the frame
         // is simply not shown.
         mtld3d_shared::crumb!("present:occluded-skip", layer.raw());
+        log::trace!(
+            target: diagnostics::TIMING_LOG_TARGET,
+            "present-skipped seq={seq:#x} view={view:#x} reason=occluded",
+        );
         drop_front(state, seq);
         return true;
     }
@@ -768,10 +772,17 @@ fn present_frame(record: &Arc<DeviceRecord>, queue: &ProtocolObject<dyn MTLComma
     super::macdrv::sync_drawable_size(&layer);
     mtld3d_shared::crumb!("present:nextdraw", seq);
     let mut drawable_wait_ns: u64 = 0;
+    let probe_started = (log::log_enabled!(target: command::PRESENT_LOG_TARGET, log::Level::Debug)
+        || log::log_enabled!(target: diagnostics::TIMING_LOG_TARGET, log::Level::Trace))
+    .then(Instant::now);
     let drawable = {
         let _wait = NanosSetTimer::start(&raw mut drawable_wait_ns);
         layer.nextDrawable()
     };
+    if let Some(started) = probe_started {
+        drawable_wait_ns = u64::try_from(started.elapsed().as_nanos())
+            .expect("a drawable acquisition fits in u64 nanoseconds");
+    }
     // A nil drawable means `nextDrawable` exhausted its timeout; self-dump
     // the ring on the onset and on recovery so an intermittent stall is
     // captured in the log without manual timing.
@@ -781,6 +792,10 @@ fn present_frame(record: &Arc<DeviceRecord>, queue: &ProtocolObject<dyn MTLComma
         // stall, or an occlusion signal that has not propagated yet. The
         // frame is dropped; its render work is committed already.
         mtld3d_shared::crumb!("present:nodrawable", seq, drawable_wait_ns);
+        log::trace!(
+            target: diagnostics::TIMING_LOG_TARGET,
+            "present-skipped seq={seq:#x} view={view:#x} reason=no-drawable wait_ns={drawable_wait_ns}",
+        );
         drop_front(state, seq);
         return true;
     };

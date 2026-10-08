@@ -132,7 +132,7 @@ fn first_pending<V>(
 ///
 /// Inherits `mtld3d::unix` filters by prefix; `mtld3d::unix::present=trace`
 /// turns on the per-frame rows without touching anything else.
-const PRESENT_LOG_TARGET: &str = "mtld3d::unix::present";
+pub(super) const PRESENT_LOG_TARGET: &str = "mtld3d::unix::present";
 
 /// A presented interval above this is a pause, not a hitch; it reseeds.
 const PRESENTED_MAX_INTERVAL_NS: u64 = 500_000_000;
@@ -466,6 +466,14 @@ fn encode_frame(record: &Arc<DeviceRecord>, params: &mut SubmitFrameParams) -> b
             objc2_foundation::NSString::from_str(&format!("mtld3d-frame-{:#x}", params.submit_seq));
         cmd_buf.setLabel(Some(&label));
     }
+    diagnostics::timeline_phase(&cmd_buf, params.submit_seq, "encode");
+    trace!(
+        target: diagnostics::TIMING_LOG_TARGET,
+        "frame-routing buffer={cmd_buf:p} seq={:#x} present={} view={:#x}",
+        params.submit_seq,
+        !params.present_layer.is_null(),
+        params.present_view.raw(),
+    );
 
     if params.upload_pass_count > params.pass_count
         || (params.pass_count != 0 && params.passes_ptr == 0)
@@ -905,6 +913,7 @@ pub fn commit_registered(
     if counter != 0 && seq > 0 {
         register_pending(pending, counter, seq, cb.retain());
     }
+    diagnostics::timeline_phase(cb, seq, "commit");
     cb.commit();
 }
 

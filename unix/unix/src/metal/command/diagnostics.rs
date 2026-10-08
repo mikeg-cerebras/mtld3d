@@ -17,7 +17,25 @@ use objc2_metal::{
 
 use super::{BlitSite, CopyBufferEndpoint, CopyEndpoint, CopyRegion};
 
+pub const TIMING_LOG_TARGET: &str = "mtld3d::unix::timing";
 const LOG_TARGET: &str = "mtld3d::unix::command";
+
+/// A CPU phase on Metal's host-uptime clock, without per-draw PERF accounting.
+pub fn timeline_phase(cb: &ProtocolObject<dyn MTLCommandBuffer>, seq: u64, phase: &str) {
+    if !log_enabled!(target: TIMING_LOG_TARGET, Level::Trace) {
+        return;
+    }
+    let Some(time_ns) = host_uptime_ns() else {
+        return;
+    };
+    let label = cb.label().map(|s| s.to_string());
+    log::trace!(
+        target: TIMING_LOG_TARGET,
+        "cpu-timing buffer={cb:p} queue={:p} role={} seq={seq:#x} phase={phase} t_ns={time_ns}",
+        Retained::as_ptr(&cb.commandQueue()),
+        buffer_role(label.as_deref()),
+    );
+}
 
 pub(super) struct TextureCopy<'a> {
     pub(super) texture: &'a ProtocolObject<dyn MTLTexture>,
@@ -362,12 +380,16 @@ pub fn completion(
     seq: Option<u64>,
     site: &str,
 ) {
-    if mtld3d_shared::perf::perf_enabled() && log_enabled!(target: "mtld3d::perf", Level::Trace) {
+    let timing = log_enabled!(target: TIMING_LOG_TARGET, Level::Trace);
+    if timing
+        || (mtld3d_shared::perf::perf_enabled()
+            && log_enabled!(target: "mtld3d::perf", Level::Trace))
+    {
         let start = cb.GPUStartTime();
         let end = cb.GPUEndTime();
         let label = cb.label().map(|s| s.to_string());
         log::trace!(
-            target: "mtld3d::perf",
+            target: if timing { TIMING_LOG_TARGET } else { "mtld3d::perf" },
             "gpu-timing buffer={cb:p} queue={:p} role={} seq={} site={site:?} \
              status={}({}) gpu_start_s={start:.9} gpu_end_s={end:.9} gpu_ms={}",
             Retained::as_ptr(&cb.commandQueue()),
@@ -420,6 +442,29 @@ pub fn failure(
         sequence(seq),
         error_details(error),
     );
+}
+
+fn host_uptime_ns() -> Option<u128> {
+    let mut timestamp = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: the supported macOS clock writes into a live timespec.
+    if unsafe { libc::clock_gettime(libc::CLOCK_UPTIME_RAW, &raw mut timestamp) } != 0 {
+        log::error!(
+            target: TIMING_LOG_TARGET,
+            "CPU timing failed: {}",
+            std::io::Error::last_os_error(),
+        );
+        return None;
+    }
+    Some(
+        std::time::Duration::new(
+            u64::try_from(timestamp.tv_sec).expect("macOS uptime is nonnegative"),
+            u32::try_from(timestamp.tv_nsec).expect("clock nanoseconds fit u32"),
+        )
+        .as_nanos(),
+    )
 }
 
 fn diagnostic_descriptor(enabled: bool) -> Option<Retained<MTLCommandBufferDescriptor>> {

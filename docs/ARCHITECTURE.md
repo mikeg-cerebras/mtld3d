@@ -416,6 +416,7 @@ Every crate logs via `log` + `env_logger`. All targets sit under `mtld3d::*` and
 | `mtld3d::unix::command`   | command-buffer completion/error and backbuffer allocation/view records (debug) |
 | `mtld3d::unix::cursor`    | software cursor: input routes, blockers, uploads, submissions and completion    |
 | `mtld3d::unix::present`   | presented-cadence probe, one row per frame (trace)                       |
+| `mtld3d::unix::timing`    | CPU encode/commit and GPU execution timestamps, including production builds (trace) |
 | `mtld3d::unix::depth`     | comparison-sampler creation, the unix mirror of `d3d9::depth` (trace)    |
 
 Each cdylib initializes the logger independently and idempotently; `mtld3d.so` has no owning entry point, so `d3d9.dll` dispatches a one-shot `InitLogger` thunk from its init path. Every line goes to the process's log file, `<exe>-<pid>.log` under `mtld3d-logs` beside the executable (`log.dir` moves it), never to the standard streams: a game a launcher spawned has no usable ones. `<pid>` is the macOS process id, so a launch never overwrites the log of the one before it; the directory keeps the ten newest logs and the ten newest traces, and the file appears with the first line written, so a process that logs nothing leaves nothing behind.
@@ -440,9 +441,21 @@ This measures GPU execution, not the CPU submission interval, drawable wait,
 input-to-display latency or time waiting in the GPU queue.
 Correlate by queue, buffer, sequence and observation site; the same buffer can
 be observed more than once, so summing every record double-counts it.
-No new callback or wait is added, and normal builds omit these records entirely.
-Trace logging still has overhead; use bounded captures and normal builds for
-final frame-time comparisons.
+`mtld3d::unix::timing=trace` enables the same GPU records in production builds,
+without the per-call PERF accounting, plus `cpu-timing` rows at render encoding
+and registered command-buffer commits. Their `t_ns` uses macOS `CLOCK_UPTIME_RAW`,
+the host-uptime domain used by Metal GPU and drawable presentation timestamps.
+`frame-routing` distinguishes present-bearing submissions from barriers and
+readbacks; `present-skipped` identifies occlusion and drawable timeouts. Rendering
+work without a matching displayed-frame timestamp is not evidence of display
+latency.
+Combine with `mtld3d::unix::present=trace` to separate CPU encode/queueing, GPU
+execution and compositor delay. The presented probe measures `wait_us` even
+without PERF; it must not report a disabled PERF timer's zero as a measured wait.
+The GPU probe adds no callback or wait. The presented probe adds one drawable
+callback per frame while enabled. Disabled targets read no extra clocks or GPU
+timestamps. Trace logging still has overhead; use bounded captures and turn
+these targets off for final frame-time comparisons.
 
 `RUST_LOG=mtld3d=warn,mtld3d::unix::command=debug` enables
 `EncoderExecutionStatus` collection for frame, upload, synchronous readback and
