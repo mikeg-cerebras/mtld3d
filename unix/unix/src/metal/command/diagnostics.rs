@@ -362,6 +362,22 @@ pub fn completion(
     seq: Option<u64>,
     site: &str,
 ) {
+    if mtld3d_shared::perf::perf_enabled() && log_enabled!(target: "mtld3d::perf", Level::Trace) {
+        let start = cb.GPUStartTime();
+        let end = cb.GPUEndTime();
+        let label = cb.label().map(|s| s.to_string());
+        log::trace!(
+            target: "mtld3d::perf",
+            "gpu-timing buffer={cb:p} queue={:p} role={} seq={} site={site:?} \
+             status={}({}) gpu_start_s={start:.9} gpu_end_s={end:.9} gpu_ms={}",
+            Retained::as_ptr(&cb.commandQueue()),
+            buffer_role(label.as_deref()),
+            sequence(seq),
+            status.0,
+            status_name(status),
+            gpu_duration_ms(status, start, end),
+        );
+    }
     if !log_enabled!(target: LOG_TARGET, Level::Debug) {
         return;
     }
@@ -421,6 +437,20 @@ fn sequence(seq: Option<u64>) -> String {
 
 fn optional_string(value: Option<&str>) -> String {
     value.map_or_else(|| "missing".to_owned(), |value| format!("{value:?}"))
+}
+
+fn gpu_duration_ms(status: MTLCommandBufferStatus, start: f64, end: f64) -> String {
+    let elapsed = (end - start) * 1_000.0;
+    if status != MTLCommandBufferStatus::Completed
+        || !start.is_finite()
+        || start <= 0.0
+        || end < start
+        || !elapsed.is_finite()
+    {
+        "unavailable".to_owned()
+    } else {
+        format!("{elapsed:.6}")
+    }
 }
 
 fn buffer_role(label: Option<&str>) -> &'static str {

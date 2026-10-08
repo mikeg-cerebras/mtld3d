@@ -34,6 +34,7 @@ pub mod fullscreen_resize;
 pub mod gamma;
 pub mod gpu_caps;
 pub mod ids;
+pub mod import_slot;
 pub mod level_authority;
 pub mod multisample;
 pub mod page_box;

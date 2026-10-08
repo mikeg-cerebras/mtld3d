@@ -410,7 +410,7 @@ Every crate logs via `log` + `env_logger`. All targets sit under `mtld3d::*` and
 | `mtld3d::d3d9::caster`    | one row per unique shadow-caster pipeline state (trace)                  |
 | `mtld3d::d3d9::decal`     | the depth bias applied per (VS, PS) pair and depth state (trace)         |
 | `mtld3d::dxso`            | DXSO to MSL emitter (`trace` dumps the MSL)                              |
-| `mtld3d::perf`            | 5-second averaged performance summary (`PERF=1` builds only)             |
+| `mtld3d::perf`            | 5-second averaged performance summary (info), GPU timestamps (trace); `PERF=1` only |
 | `mtld3d::shim`            | Wine unix-call PE shim DLL                                               |
 | `mtld3d::unix`            | Metal-side `.so`                                                         |
 | `mtld3d::unix::command`   | command-buffer completion/error and backbuffer allocation/view records (debug) |
@@ -429,6 +429,20 @@ is explicit. The record uses the same startup backlog and process log as the
 build stamp; the allocating loader query never runs from a signal handler.
 
 ### Command-buffer completion and encoder errors
+
+On a `PERF=1` build, `RUST_LOG=mtld3d=warn,mtld3d::perf=trace` records
+`gpu-timing` at the existing command-buffer observation sites without enabling
+encoder-error collection. `gpu_start_s` and `gpu_end_s` are Metal's
+`GPUStartTime` and `GPUEndTime`, in seconds on the host timebase.
+`gpu_ms` is their difference in milliseconds only for a successfully completed
+buffer with finite, nonzero, ordered timestamps; otherwise it is `unavailable`.
+This measures GPU execution, not the CPU submission interval, drawable wait,
+input-to-display latency or time waiting in the GPU queue.
+Correlate by queue, buffer, sequence and observation site; the same buffer can
+be observed more than once, so summing every record double-counts it.
+No new callback or wait is added, and normal builds omit these records entirely.
+Trace logging still has overhead; use bounded captures and normal builds for
+final frame-time comparisons.
 
 `RUST_LOG=mtld3d=warn,mtld3d::unix::command=debug` enables
 `EncoderExecutionStatus` collection for frame, upload, synchronous readback and

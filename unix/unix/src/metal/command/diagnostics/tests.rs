@@ -18,8 +18,8 @@ use objc2_metal::{
 use super::{
     BlitSite, DepthTransfer, DepthTransferResample, append_signposts, buffer_role,
     copy_buffer_details, depth_transfer, depth_transfer_resample, diagnostic_descriptor,
-    dispatch_region, encoder_state_name, error_details, metadata_string, optional_string,
-    resample_details, sequence, status_name, texture_details,
+    dispatch_region, encoder_state_name, error_details, gpu_duration_ms, metadata_string,
+    optional_string, resample_details, sequence, status_name, texture_details,
 };
 
 define_class!(
@@ -275,6 +275,52 @@ fn completion_states_include_nonterminal_and_future_values() {
         (MTLCommandBufferStatus(99), "unrecognized"),
     ] {
         assert_eq!(status_name(status), name);
+    }
+}
+
+#[test]
+fn gpu_duration_uses_completed_metal_timestamps_in_milliseconds() {
+    assert_eq!(
+        gpu_duration_ms(MTLCommandBufferStatus::Completed, 123.0, 123.015_625),
+        "15.625000",
+    );
+    assert_eq!(
+        gpu_duration_ms(MTLCommandBufferStatus::Completed, 123.0, 123.0),
+        "0.000000",
+    );
+}
+
+#[test]
+fn gpu_duration_does_not_infer_completion_from_timestamps() {
+    for status in [
+        MTLCommandBufferStatus::NotEnqueued,
+        MTLCommandBufferStatus::Enqueued,
+        MTLCommandBufferStatus::Committed,
+        MTLCommandBufferStatus::Scheduled,
+        MTLCommandBufferStatus::Error,
+        MTLCommandBufferStatus(99),
+    ] {
+        assert_eq!(gpu_duration_ms(status, 123.0, 124.0), "unavailable");
+    }
+}
+
+#[test]
+fn gpu_duration_preserves_missing_and_invalid_timestamps_as_unavailable() {
+    for (start, end) in [
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (-1.0, 1.0),
+        (2.0, 1.0),
+        (f64::NAN, 1.0),
+        (1.0, f64::NAN),
+        (f64::INFINITY, f64::INFINITY),
+        (1.0, f64::INFINITY),
+        (1.0, f64::MAX),
+    ] {
+        assert_eq!(
+            gpu_duration_ms(MTLCommandBufferStatus::Completed, start, end),
+            "unavailable",
+        );
     }
 }
 

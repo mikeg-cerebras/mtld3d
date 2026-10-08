@@ -7,6 +7,9 @@
 //! are never patched, so it keeps reaching the real entry points. A module
 //! that resolves the same entry point through `GetProcAddress` is not
 //! covered: nothing it calls goes through an import slot.
+//!
+//! A loader-accepted import table can be packed without pointer alignment.
+//! Both reading and replacing a slot must preserve that representation.
 
 use core::{
     ffi::c_void,
@@ -149,9 +152,8 @@ impl MappedImage {
             }
             // `IMAGE_IMPORT_BY_NAME`: a u16 hint, then the name.
             if self.c_string(entry + 2) == func {
-                // An import-address-table entry is pointer-aligned by the PE
-                // layout; the address stays inside the mapping (see `read`)
-                // and keeps the image's provenance.
+                // The address stays inside the mapping (see `read`) and keeps
+                // the image's provenance, but need not be pointer-aligned.
                 let slot = addresses + j * size_of::<usize>();
                 return Some(ptr::with_exposed_provenance_mut(
                     self.base.expose_provenance() + slot,
@@ -282,9 +284,9 @@ fn write_slot(slot: *mut *const (), value: *const ()) -> Option<*const ()> {
     if opened == 0 {
         return None;
     }
-    // SAFETY: the slot's page is writable as of the call above and the slot
-    // is a valid, aligned pointer-sized entry of the import address table.
-    let previous = unsafe { slot.replace(value) };
+    // SAFETY: the slot's page is writable as of the call above. Import
+    // installation and removal own access to this initialized pointer-sized slot.
+    let previous = unsafe { mtld3d_core::import_slot::replace(slot, value) };
     // SAFETY: restoring the protection the page had; a failure here leaves
     // the page writable, which is harmless.
     unsafe {
